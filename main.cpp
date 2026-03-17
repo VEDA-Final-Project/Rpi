@@ -14,12 +14,24 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <QTimer>
+struct CameraInfo {
+    QString ip;
+    QString user;
+    QString pass;
+};
 
 class VmsController : public QWidget {
     Q_OBJECT
 
 public:
     VmsController(QWidget *parent = nullptr) : QWidget(parent) {
+        // 1. 카메라 정보 로드
+        cams[1] = {"192.168.0.23", "admin", "1team@@@"};
+        cams[2] = {"192.168.0.34", "admin", "1team@@@"};
+        cams[3] = {"192.168.0.76", "admin", "1team@@@"};
+        cams[4] = {"192.168.0.78", "admin", "1team@@@"};
+
         setupDesign();
         setupUI();
         setupPlayer();
@@ -27,14 +39,17 @@ public:
 
         udpSocket = new QUdpSocket(this);
         dbTabs << "주차 이력" << "사용자" << "장치 로그" << "차량 정보" << "주차구역 현황";
-        
-        qDebug() << "[SYSTEM] Qt 싱글앱 통합 완료. 디자인 최적화 모드 실행 중.";
+
+        // 초기 실행 시 채널 1번 자동 재생
+        QTimer::singleShot(500, [this](){ changeChannel(1); });
     }
 
 private:
     QUdpSocket *udpSocket;
     QMediaPlayer *player;
     QVideoWidget *videoWidget;
+    QMap<int, CameraInfo> cams;
+    QMap<int, QPushButton*> channelButtons;
     
     QStringList dbTabs;
     int currentDbIdx = 0;
@@ -42,7 +57,7 @@ private:
     QSocketNotifier *joyNotifier = nullptr;
     
     QPushButton *dbSwitchBtn;
-    const QString desktopIp = "192.168.0.100"; // 필요시 192.168.0.96으로 변경
+    const QString desktopIp = "192.168.0.100"; 
     const quint16 port = 12345;
 
     void setupDesign() {
@@ -50,11 +65,10 @@ private:
         this->setStyleSheet(
             "QWidget { background-color: #1a1d23; color: #e1e1e1; font-family: 'Segoe UI', Arial; }"
             "QPushButton { background-color: #2d323e; border: 1px solid #3f4552; border-radius: 4px; padding: 10px; font-weight: bold; }"
-            "QPushButton:pressed { background-color: #3f4552; color: #00ff88; }"
+            "QPushButton:pressed { background-color: #00ff88; color: #1a1d23; }"
             "QPushButton#channelBtn { border-left: 4px solid #00ff88; text-align: left; padding-left: 15px; }"
-            "QPushButton#captureBtn { border: 1px solid #3498db; color: #3498db; }"
-            "QPushButton#recordBtn { border: 1px solid #e74c3c; color: #e74c3c; }"
-            "QPushButton#dbBtn { background-color: #252a33; border: 2px solid #00ff88; font-size: 18px; color: #ffffff; }"
+            "QPushButton#channelBtn:checked { background-color: #3f4552; border-left: 4px solid #ffffff; }"
+            "QPushButton#dbBtn { background-color: #252a33; border: 2px solid #00ff88; font-size: 18px; }"
             "QLabel#title { color: #00ff88; font-size: 20px; font-weight: bold; }"
         );
     }
@@ -62,51 +76,40 @@ private:
     void setupUI() {
         QHBoxLayout *midLayout = new QHBoxLayout(this);
 
-        // --- 1. 왼쪽 사이드바 (사용자님이 원하신 그 레이아웃) ---
+        // --- 왼쪽 사이드바 ---
         QVBoxLayout *sideBar = new QVBoxLayout();
-        QLabel *titleLabel = new QLabel("VEDA");
+        QLabel *titleLabel = new QLabel("VEDA 1Team VMS");
         titleLabel->setObjectName("title");
         sideBar->addWidget(titleLabel);
 
         for(int i=1; i<=4; ++i) {
-            QPushButton *chBtn = new QPushButton(QString("CHANNEL %1").arg(i));
+            QPushButton *chBtn = new QPushButton(QString("CH %1").arg(i));
             chBtn->setObjectName("channelBtn");
+            chBtn->setCheckable(true);
             chBtn->setFixedSize(140, 45);
-            connect(chBtn, &QPushButton::clicked, [this, i](){ sendCmd(QString("CMD:CH:%1").arg(i)); });
+            connect(chBtn, &QPushButton::clicked, [this, i](){ changeChannel(i); });
             sideBar->addWidget(chBtn);
+            channelButtons[i] = chBtn;
         }
 
         sideBar->addSpacing(20);
-        sideBar->addWidget(new QLabel("--- MEDIA ---"));
-
-        QPushButton *capBtn = new QPushButton("IMAGE CAPTURE");
-        capBtn->setObjectName("captureBtn");
-        capBtn->setFixedSize(140, 45);
-        
-        QPushButton *recBtn = new QPushButton("VIDEO RECORD");
-        recBtn->setObjectName("recordBtn");
-        recBtn->setFixedSize(140, 45);
-
+        sideBar->addWidget(new QLabel("----- MEDIA -----"));
+        QPushButton *capBtn = new QPushButton("CAPTURE");
+        QPushButton *recBtn = new QPushButton("RECORD");
         sideBar->addWidget(capBtn);
         sideBar->addWidget(recBtn);
         sideBar->addStretch();
         midLayout->addLayout(sideBar);
 
-        // --- 2. 우측 메인 영역 (통합 영상 위젯 + DB 버튼) ---
+        // --- 우측 메인 영역 ---
         QVBoxLayout *mainArea = new QVBoxLayout();
-        
         videoWidget = new QVideoWidget(this);
         videoWidget->setStyleSheet("background-color: #000; border: 1px solid #333;");
         mainArea->addWidget(videoWidget, 1);
 
-        QPushButton *toggleBtn = new QPushButton("LIVE VIEW ON / OFF");
-        toggleBtn->setFixedHeight(40);
-        connect(toggleBtn, &QPushButton::clicked, this, &VmsController::toggleVideo);
-        mainArea->addWidget(toggleBtn);
-
         dbSwitchBtn = new QPushButton("DB TAB: [ 주차 이력 ]");
         dbSwitchBtn->setObjectName("dbBtn");
-        dbSwitchBtn->setFixedHeight(80);
+        dbSwitchBtn->setFixedHeight(70);
         connect(dbSwitchBtn, &QPushButton::clicked, this, &VmsController::handleDbSwitch);
         mainArea->addWidget(dbSwitchBtn);
 
@@ -121,30 +124,28 @@ private:
         player->setVideoOutput(videoWidget);
     }
 
-    void toggleVideo() {
-        if (player->state() == QMediaPlayer::PlayingState) {
-            player->stop();
-            logAction("Video Stopped");
-        } else {
-            // [해결] 특수문자(@)를 포함한 인증 정보를 안전하게 설정
-            QUrl url("rtsp://192.168.0.23:554/profile9/media.smp");
-            url.setUserName("admin");
-            url.setPassword("1team@@@"); // QUrl이 자동으로 퍼센트 인코딩을 처리합니다.
+    void changeChannel(int ch) {
+        qDebug() << "[ACTION] Channel" << ch << "Selected";
+        for(int i=1; i<=4; ++i) channelButtons[i]->setChecked(i == ch);
 
-            player->setMedia(url);
-            player->play();
-            logAction("Starting Integrated Video (Profile 9)");
-        }
+        player->stop();
+        
+        QUrl url(QString("rtsp://%1:554/profile9/media.smp").arg(cams[ch].ip));
+        url.setUserName(cams[ch].user);
+        url.setPassword(cams[ch].pass);
+
+        player->setMedia(url);
+        player->play();
+
+        sendCmd(QString("CMD:CH:%1").arg(ch));
     }
 
     void handleDbSwitch() {
         currentDbIdx = (currentDbIdx + 1) % dbTabs.size();
         dbSwitchBtn->setText(QString("DB TAB: [ %1 ]").arg(dbTabs[currentDbIdx]));
-        logAction(QString("DB Tab Changed: %1").arg(dbTabs[currentDbIdx]));
         sendCmd(QString("CMD:DB:TAB:%1").arg(currentDbIdx));
     }
 
-    // --- 조이스틱 및 통신 (기존 로직 유지) ---
     void setupJoystick() {
         joyFd = open("/dev/input/event4", O_RDONLY | O_NONBLOCK);
         if (joyFd >= 0) {
@@ -169,13 +170,12 @@ private:
         udpSocket->writeDatagram(msg.toUtf8(), QHostAddress(desktopIp), port);
         qDebug() << "[UDP SENT] " << msg;
     }
-
-    void logAction(QString action) {
-        qDebug() << "[" << QDateTime::currentDateTime().toString("HH:mm:ss") << "] " << action;
-    }
 };
 
 int main(int argc, char *argv[]) {
+    // [보정] 하드웨어 가속 라이브러리 강제 사용
+    qputenv("GST_V4L2_USE_LIBV4L2", "1");
+    
     QApplication a(argc, argv);
     VmsController w;
     w.showFullScreen();
