@@ -7,14 +7,18 @@
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QHeaderView>
-#include <QUdpSocket>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QMediaPlayer>
 #include <QVideoWidget>
 #include <QUrl>
 #include <QDebug>
-#include <QDateTime>
-#include <QSocketNotifier>
 #include <QTimer>
+#include <QDateTime>
+#include <QFontDatabase>
+#include <QSocketNotifier>
+#include <QFile>
+#include <QDir>
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
@@ -30,220 +34,256 @@ class VmsController : public QWidget {
 
 public:
     VmsController(QWidget *parent = nullptr) : QWidget(parent) {
-        cams[1] = {"192.168.0.23", "admin", "1team@@@"};
-        cams[2] = {"192.168.0.34", "admin", "1team@@@"};
-        cams[3] = {"192.168.0.76", "admin", "1team@@@"};
-        cams[4] = {"192.168.0.78", "admin", "1team@@@"};
+        cams[1] = CameraInfo{"192.168.0.23", "admin", "1team@@@"};
+        cams[2] = CameraInfo{"192.168.0.34", "admin", "1team@@@"};
+        cams[3] = CameraInfo{"192.168.0.76", "admin", "1team@@@"};
+        cams[4] = CameraInfo{"192.168.0.78", "admin", "1team@@@"};
 
         setupDesign();
         setupUI();
         setupPlayer();
         setupJoystick();
+        setupEncoder(); 
+        setupTcpServer();
 
-        udpSocket = new QUdpSocket(this);
-        dbTabs << "주차 이력" << "사용자" << "장치 로그" << "차량 정보" << "주차구역 현황";
-
+        dbTabs << "주차 이력" << "사용자" << "차량 정보" << "주차구역 현황";
         QTimer::singleShot(500, [this](){ changeChannel(1); });
     }
 
 private:
-    QUdpSocket *udpSocket;
+    QTcpServer *tcpServer;
+    QList<QTcpSocket*> clients;
+    QLabel *statusDot, *statusText;
     QMediaPlayer *player;
     QVideoWidget *videoWidget;
-    QStackedWidget *contentStack; // 화면 전환용 스택
-    QTableWidget *dbTable;        // DB 데이터용 테이블
-    
+    QStackedWidget *contentStack;
+    QTableWidget *dbTable;
+    QPushButton *dbSwitchBtn;
+
     QMap<int, CameraInfo> cams;
     QMap<int, QPushButton*> channelButtons;
     QStringList dbTabs;
+    int currentCh = 1;
     int currentDbIdx = 0;
     int joyFd = -1;
-    QSocketNotifier *joyNotifier = nullptr;
+    QString lastXDir = "", lastYDir = "";
     
-    // 조이스틱 상태
-    bool isMovingX = false;
-    bool isMovingY = false;
+    // 엔코더 상태 관리
+    int lastClkState = -1;
+    int lastSwState = 1; // 스위치는 평소에 High(1)
 
-    QPushButton *dbSwitchBtn;
-    const QString desktopIp = "192.168.0.100"; 
-    const quint16 port = 12345;
+    void sendPacket(QString cmd, QString d1, QString d2 = "") {
+        QString packet = QString("$%1,%2").arg(cmd).arg(d1);
+        if (!d2.isEmpty()) packet += "," + d2;
+        packet += "\n";
+
+        for (QTcpSocket *client : clients) {
+            if (client->state() == QAbstractSocket::ConnectedState) {
+                client->write(packet.toUtf8());
+                client->flush();
+            }
+        }
+        qDebug().noquote() << "[TX]" << packet.trimmed();
+    }
 
     void setupDesign() {
-        this->resize(800, 480);
+        this->setFixedSize(800, 480);
+        int fontId = QFontDatabase::addApplicationFont("/home/karas/.local/share/fonts/Pretendard-Regular.otf");
+        if (fontId != -1) QApplication::setFont(QFont(QFontDatabase::applicationFontFamilies(fontId).at(0)));
+
         this->setStyleSheet(
-            "QWidget { background-color: #1a1d23; color: #e1e1e1; font-family: 'Segoe UI', Arial; }"
-            "QPushButton { background-color: #2d323e; border: 1px solid #3f4552; border-radius: 4px; padding: 10px; font-weight: bold; }"
-            "QPushButton:pressed { background-color: #00ff88; color: #1a1d23; }"
-            "QPushButton#channelBtn { border-left: 4px solid #00ff88; text-align: left; padding-left: 15px; }"
-            "QPushButton#channelBtn:checked { background-color: #3f4552; border-left: 4px solid #ffffff; }"
-            "QPushButton#mediaBtn { border: 1px solid #3498db; color: #3498db; }"
-            "QPushButton#viewSwitchBtn { border: 2px solid #e67e22; color: #e67e22; font-size: 13px; }"
-            "QPushButton#dbBtn { background-color: #252a33; border: 2px solid #00ff88; font-size: 18px; }"
-            "QLabel#title { color: #00ff88; font-size: 20px; font-weight: bold; }"
-            "QTableWidget { background-color: #252a33; gridline-color: #3f4552; border: none; }"
-            "QHeaderView::section { background-color: #2d323e; color: #00ff88; font-weight: bold; border: 1px solid #3f4552; }"
+            "QWidget { background-color: #0f1115; color: #e1e1e1; font-family: 'Pretendard'; }"
+            "QPushButton#channelBtn { background-color: #1c1f26; border: 1px solid #2d323e; border-radius: 6px; padding: 10px; font-weight: 600; }"
+            "QPushButton#channelBtn:checked { border: 1px solid #00ff88; color: #00ff88; }"
+            "QPushButton#mediaBtn { background-color: #2980b9; border-radius: 6px; color: white; font-weight: bold; min-height: 40px; }"
+            "QPushButton#viewSwitchBtn { border: 2px solid #e67e22; border-radius: 6px; color: #e67e22; font-weight: 800; font-size: 11px; }"
+            "QPushButton#dbBtn { background-color: #00ff88; color: #0f1115; border-radius: 6px; font-size: 16px; font-weight: 800; }"
+            "QLabel#title { color: #00ff88; font-size: 18px; font-weight: 900; }"
         );
     }
 
     void setupUI() {
-        QHBoxLayout *midLayout = new QHBoxLayout(this);
+        QVBoxLayout *rootLayout = new QVBoxLayout(this);
+        rootLayout->setContentsMargins(10, 5, 10, 10);
+        rootLayout->setSpacing(5);
 
-        // --- 1. 왼쪽 사이드바 (개편됨) ---
+        QHBoxLayout *header = new QHBoxLayout();
+        QLabel *title = new QLabel("VEDA SMART NVR");
+        title->setObjectName("title");
+        statusDot = new QLabel();
+        statusDot->setFixedSize(12, 12);
+        statusDot->setStyleSheet("background-color: #ff4d4d; border-radius: 6px;");
+        statusText = new QLabel("OFFLINE");
+        statusText->setStyleSheet("color: #ff4d4d; font-size: 10px; font-weight: bold;");
+
+        header->addWidget(title); header->addStretch();
+        header->addWidget(statusText); header->addWidget(statusDot);
+        rootLayout->addLayout(header);
+
+        QHBoxLayout *midLayout = new QHBoxLayout();
         QVBoxLayout *sideBar = new QVBoxLayout();
-        QLabel *titleLabel = new QLabel("VEDA NVR");
-        titleLabel->setObjectName("title");
-        sideBar->addWidget(titleLabel);
-
-        // 채널 버튼 1~4
         for(int i=1; i<=4; ++i) {
-            QPushButton *chBtn = new QPushButton(QString("CH %1").arg(i));
+            QPushButton *chBtn = new QPushButton(QString("CH 0%1").arg(i));
             chBtn->setObjectName("channelBtn");
             chBtn->setCheckable(true);
-            chBtn->setFixedSize(140, 42);
+            chBtn->setFixedSize(125, 42); 
             connect(chBtn, &QPushButton::clicked, [this, i](){ changeChannel(i); });
             sideBar->addWidget(chBtn);
             channelButtons[i] = chBtn;
         }
 
-        sideBar->addSpacing(15);
-        sideBar->addWidget(new QLabel("--- MEDIA ---"));
-
-        // 이미지 캡처 & 영상 녹화 (복구)
-        QPushButton *capBtn = new QPushButton("IMAGE CAPTURE");
+        sideBar->addSpacing(5);
+        QPushButton *capBtn = new QPushButton("CAPTURE");
         capBtn->setObjectName("mediaBtn");
-        QPushButton *recBtn = new QPushButton("VIDEO RECORD");
+        QPushButton *recBtn = new QPushButton("RECORD");
         recBtn->setObjectName("mediaBtn");
-        sideBar->addWidget(capBtn);
-        sideBar->addWidget(recBtn);
+        sideBar->addWidget(capBtn); sideBar->addWidget(recBtn);
 
-        sideBar->addSpacing(10);
-
-        // 화면 전환 버튼 (신규)
-        QPushButton *viewSwitchBtn = new QPushButton("VIEW SWITCH\n[CCTV <-> DB]");
-        viewSwitchBtn->setObjectName("viewSwitchBtn");
-        viewSwitchBtn->setFixedSize(140, 55);
-        connect(viewSwitchBtn, &QPushButton::clicked, this, &VmsController::toggleMainView);
-        sideBar->addWidget(viewSwitchBtn);
-        
-        sideBar->addStretch();
+        QPushButton *viewBtn = new QPushButton("VIEW SWITCH");
+        viewBtn->setObjectName("viewSwitchBtn");
+        viewBtn->setFixedSize(125, 52);
+        connect(viewBtn, &QPushButton::clicked, this, &VmsController::toggleMainView);
+        sideBar->addWidget(viewBtn); sideBar->addStretch();
         midLayout->addLayout(sideBar);
 
-        // --- 2. 우측 메인 영역 (스택 구조) ---
         QVBoxLayout *mainArea = new QVBoxLayout();
-        
-        contentStack = new QStackedWidget(this);
-
-        // [Page 0] 실시간 CCTV 화면
+        contentStack = new QStackedWidget();
         videoWidget = new QVideoWidget();
-        videoWidget->setStyleSheet("background-color: #000; border: 1px solid #333;");
+        videoWidget->setStyleSheet("background-color: black; border-radius: 8px;");
         contentStack->addWidget(videoWidget);
 
-        // [Page 1] DB 데이터 테이블 화면
-        dbTable = new QTableWidget(10, 3); // 10행 3열 예시
-        dbTable->setHorizontalHeaderLabels({"시간", "이벤트", "상세 내용"});
+        dbTable = new QTableWidget(10, 3);
+        dbTable->setHorizontalHeaderLabels({"TIME", "EVENT", "VALUE"});
         dbTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-        // 가짜 데이터 채우기 (나중에 실제 DB 쿼리 결과로 교체 가능)
-        for(int r=0; r<10; ++r) {
-            dbTable->setItem(r, 0, new QTableWidgetItem("19:30:12"));
-            dbTable->setItem(r, 1, new QTableWidgetItem("ENTRY"));
-            dbTable->setItem(r, 2, new QTableWidgetItem("차량번호 12가 3456"));
-        }
         contentStack->addWidget(dbTable);
-
         mainArea->addWidget(contentStack, 1);
 
-        // 하단 DB 탭 순환 버튼
         dbSwitchBtn = new QPushButton("DB TAB: [ 주차 이력 ]");
         dbSwitchBtn->setObjectName("dbBtn");
-        dbSwitchBtn->setFixedHeight(65);
+        dbSwitchBtn->setFixedHeight(55);
         connect(dbSwitchBtn, &QPushButton::clicked, this, &VmsController::handleDbSwitch);
         mainArea->addWidget(dbSwitchBtn);
 
         midLayout->addLayout(mainArea, 1);
+        rootLayout->addLayout(midLayout);
 
-        // 버튼 신호 연결
-        connect(capBtn, &QPushButton::clicked, [this](){ sendCmd("CMD:CAP:NOW"); });
-        connect(recBtn, &QPushButton::clicked, [this](){ sendCmd("CMD:REC:TOGGLE"); });
+        connect(capBtn, &QPushButton::clicked, [this](){ sendPacket("BTN", "294"); });
+        connect(recBtn, &QPushButton::clicked, [this](){ sendPacket("BTN", "295"); });
     }
 
-    void setupPlayer() {
-        player = new QMediaPlayer(this, QMediaPlayer::LowLatency);
-        player->setVideoOutput(videoWidget);
+    void setupTcpServer() {
+        tcpServer = new QTcpServer(this);
+        if (tcpServer->listen(QHostAddress::Any, 12345)) {
+            connect(tcpServer, &QTcpServer::newConnection, [this]() {
+                QTcpSocket *client = tcpServer->nextPendingConnection();
+                clients.append(client);
+                statusDot->setStyleSheet("background-color: #00ff88; border-radius: 6px;");
+                statusText->setText("CONNECTED");
+                statusText->setStyleSheet("color: #00ff88; font-size: 10px; font-weight: bold;");
+                connect(client, &QTcpSocket::disconnected, [this, client]() {
+                    clients.removeAll(client); client->deleteLater();
+                    if (clients.isEmpty()) {
+                        statusDot->setStyleSheet("background-color: #ff4d4d; border-radius: 6px;");
+                        statusText->setText("OFFLINE");
+                        statusText->setStyleSheet("color: #ff4d4d; font-size: 10px; font-weight: bold;");
+                    }
+                });
+            });
+        }
     }
 
-    // [핵심] 화면 전환 함수
-    void toggleMainView() {
-        int nextIdx = (contentStack->currentIndex() == 0) ? 1 : 0;
-        contentStack->setCurrentIndex(nextIdx);
-        
-        QString viewName = (nextIdx == 0) ? "CCTV MODE" : "DB TABLE MODE";
-        qDebug() << "[VIEW SWITCH]" << viewName;
-        
-        // 화면 전환 시 데스크탑에도 알려주면 좋습니다.
-        sendCmd(QString("CMD:VIEW:%1").arg(nextIdx));
-    }
-
-    void changeChannel(int ch) {
-        for(int i=1; i<=4; ++i) channelButtons[i]->setChecked(i == ch);
-        player->stop();
-        // 화면이 DB 모드여도 채널을 바꾸면 자동으로 CCTV 모드로 돌아오게 할 수도 있습니다.
-        // contentStack->setCurrentIndex(0); 
-
-        QUrl url(QString("rtsp://%1:554/profile9/media.smp").arg(cams[ch].ip));
-        url.setUserName(cams[ch].user);
-        url.setPassword(cams[ch].pass);
-        player->setMedia(url);
-        player->play();
-        sendCmd(QString("CMD:CH:%1").arg(ch));
-    }
-
-    void handleDbSwitch() {
-        currentDbIdx = (currentDbIdx + 1) % dbTabs.size();
-        dbSwitchBtn->setText(QString("DB TAB: [ %1 ]").arg(dbTabs[currentDbIdx]));
-        sendCmd(QString("CMD:DB:TAB:%1").arg(currentDbIdx));
-    }
-
-    // --- 조이스틱/통신 (기존과 동일) ---
     void setupJoystick() {
         joyFd = open("/dev/input/event4", O_RDONLY | O_NONBLOCK);
         if (joyFd >= 0) {
-            joyNotifier = new QSocketNotifier(joyFd, QSocketNotifier::Read, this);
-            connect(joyNotifier, &QSocketNotifier::activated, this, &VmsController::readJoystick);
+            QSocketNotifier *notifier = new QSocketNotifier(joyFd, QSocketNotifier::Read, this);
+            connect(notifier, &QSocketNotifier::activated, this, &VmsController::readJoystick);
         }
     }
 
     void readJoystick() {
         struct input_event ev;
         while (read(joyFd, &ev, sizeof(ev)) > 0) {
-            if (ev.type == EV_KEY) {
-                if (ev.value == 1) {
-                    qDebug() << "[ARC BUTTON]" << "Code:" << ev.code;
-                    sendCmd(QString("CMD:BTN:%1").arg(ev.code));
-                }
-            }
-            else if (ev.type == EV_ABS) {
+            if (ev.type == EV_ABS) {
                 if (ev.code == ABS_X) {
-                    if (ev.value > 200) { sendCmd("CMD:PTZ:RIGHT"); isMovingX = true; }
-                    else if (ev.value < 50) { sendCmd("CMD:PTZ:LEFT"); isMovingX = true; }
-                    else if (ev.value >= 120 && ev.value <= 135) {
-                        if (isMovingX) { sendCmd("CMD:PTZ:STOP"); isMovingX = false; }
+                    if (ev.value > 200) { sendPacket("JOY", "R", "1"); lastXDir = "R"; }
+                    else if (ev.value < 50) { sendPacket("JOY", "L", "1"); lastXDir = "L"; }
+                    else if (ev.value >= 120 && ev.value <= 135 && !lastXDir.isEmpty()) {
+                        sendPacket("JOY", lastXDir, "0"); lastXDir = ""; 
                     }
                 }
                 else if (ev.code == ABS_Y) {
-                    if (ev.value > 200) { sendCmd("CMD:PTZ:DOWN"); isMovingY = true; }
-                    else if (ev.value < 50) { sendCmd("CMD:PTZ:UP"); isMovingY = true; }
-                    else if (ev.value >= 120 && ev.value <= 135) {
-                        if (isMovingY) { sendCmd("CMD:PTZ:STOP"); isMovingY = false; }
+                    if (ev.value > 200) { sendPacket("JOY", "D", "1"); lastYDir = "D"; }
+                    else if (ev.value < 50) { sendPacket("JOY", "U", "1"); lastYDir = "U"; }
+                    else if (ev.value >= 120 && ev.value <= 135 && !lastYDir.isEmpty()) {
+                        sendPacket("JOY", lastYDir, "0"); lastYDir = "";
                     }
                 }
+            }
+            else if (ev.type == EV_KEY && ev.value == 1) {
+                sendPacket("BTN", QString::number(ev.code));
             }
         }
     }
 
-    void sendCmd(QString msg) {
-        udpSocket->writeDatagram(msg.toUtf8(), QHostAddress(desktopIp), port);
-        qDebug() << "[UDP SENT]" << msg;
+    // --- [수정] 엔코더 핀 변경 및 스위치(GPIO 25) 추가 ---
+    void setupEncoder() {
+        auto exportGpio = [](int pin) {
+            if (!QDir(QString("/sys/class/gpio/gpio%1").arg(pin)).exists()) {
+                QFile f("/sys/class/gpio/export");
+                if (f.open(QIODevice::WriteOnly)) { f.write(QByteArray::number(pin)); f.close(); usleep(100000); }
+            }
+            QFile dir(QString("/sys/class/gpio/gpio%1/direction").arg(pin));
+            if (dir.open(QIODevice::WriteOnly)) { dir.write("in"); dir.close(); }
+        };
+
+        exportGpio(5); // CLK
+        exportGpio(6); // DT
+        exportGpio(13); // SW (스위치)
+
+        QTimer *timer = new QTimer(this);
+        connect(timer, &QTimer::timeout, this, &VmsController::readEncoder);
+        timer->start(5);
     }
+
+    void readEncoder() {
+        QFile fClk("/sys/class/gpio/gpio5/value");
+        QFile fDt("/sys/class/gpio/gpio6/value");
+        QFile fSw("/sys/class/gpio/gpio13/value");
+
+        if (fClk.open(QIODevice::ReadOnly) && fDt.open(QIODevice::ReadOnly)) {
+            int c = fClk.readAll().trimmed().toInt();
+            int d = fDt.readAll().trimmed().toInt();
+            if (lastClkState != -1 && c != lastClkState) {
+                // 회전 패킷 전송
+                sendPacket("ENC", (d != c) ? "1" : "-1");
+            }
+            lastClkState = c;
+        }
+
+        if (fSw.open(QIODevice::ReadOnly)) {
+            int s = fSw.readAll().trimmed().toInt();
+            // Low(0)일 때 눌린 것으로 판단 (풀업 저항 기준)
+            if (s == 0 && lastSwState == 1) {
+                sendPacket("ENC", "CLK"); // 리셋 패킷 전송
+                qDebug() << "[ENCODER] Switch Pressed - Reset sent";
+            }
+            lastSwState = s;
+        }
+    }
+
+    void changeChannel(int ch) {
+        currentCh = ch;
+        for(int i=1; i<=4; ++i) channelButtons[i]->setChecked(i == ch);
+        player->stop();
+        QUrl url(QString("rtsp://%1:554/profile7/media.smp").arg(cams[ch].ip));
+        url.setUserName(cams[ch].user); url.setPassword(cams[ch].pass);
+        player->setMedia(url); player->play();
+        sendPacket("BTN", QString::number(287 + ch));
+    }
+
+    void setupPlayer() { player = new QMediaPlayer(this, QMediaPlayer::LowLatency); player->setVideoOutput(videoWidget); }
+    void toggleMainView() { contentStack->setCurrentIndex(contentStack->currentIndex() == 0 ? 1 : 0); sendPacket("BTN", "292"); }
+    void handleDbSwitch() { currentDbIdx = (currentDbIdx + 1) % dbTabs.size(); dbSwitchBtn->setText(QString("DB TAB: [ %1 ]").arg(dbTabs[currentDbIdx])); sendPacket("BTN", "293"); }
 };
 
 int main(int argc, char *argv[]) {
