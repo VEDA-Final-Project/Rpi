@@ -14,19 +14,15 @@
 #include <QUrl>
 #include <QDebug>
 #include <QTimer>
-#include <QDateTime>
 #include <QFontDatabase>
 #include <QSocketNotifier>
-#include <QFile>
-#include <QDir>
+#include <gpiod.h> // libgpiod 헤더
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
 
 struct CameraInfo {
-    QString ip;
-    QString user;
-    QString pass;
+    QString ip, user, pass;
 };
 
 class VmsController : public QWidget {
@@ -34,16 +30,16 @@ class VmsController : public QWidget {
 
 public:
     VmsController(QWidget *parent = nullptr) : QWidget(parent) {
-        cams[1] = CameraInfo{"192.168.0.23", "admin", "1team@@@"};
-        cams[2] = CameraInfo{"192.168.0.34", "admin", "1team@@@"};
-        cams[3] = CameraInfo{"192.168.0.76", "admin", "1team@@@"};
-        cams[4] = CameraInfo{"192.168.0.78", "admin", "1team@@@"};
+        cams[1] = {"192.168.0.23", "admin", "1team@@@"};
+        cams[2] = {"192.168.0.34", "admin", "1team@@@"};
+        cams[3] = {"192.168.0.76", "admin", "1team@@@"};
+        cams[4] = {"192.168.0.78", "admin", "1team@@@"};
 
         setupDesign();
         setupUI();
         setupPlayer();
         setupJoystick();
-        setupEncoder(); 
+        setupEncoder(); // libgpiod 방식
         setupTcpServer();
 
         dbTabs << "주차 이력" << "사용자" << "차량 정보" << "주차구역 현황";
@@ -63,24 +59,24 @@ private:
     QMap<int, CameraInfo> cams;
     QMap<int, QPushButton*> channelButtons;
     QStringList dbTabs;
-    int currentCh = 1;
-    int currentDbIdx = 0;
+    int currentCh = 1, currentDbIdx = 0;
     int joyFd = -1;
     QString lastXDir = "", lastYDir = "";
-    
-    // 엔코더 상태 관리
+
+    // libgpiod 관련 변수
+    struct gpiod_chip *chip = nullptr;
+    struct gpiod_line_request *line_request = nullptr;
     int lastClkState = -1;
-    int lastSwState = 1; // 스위치는 평소에 High(1)
+    int lastSwState = 1;
 
     void sendPacket(QString cmd, QString d1, QString d2 = "") {
         QString packet = QString("$%1,%2").arg(cmd).arg(d1);
         if (!d2.isEmpty()) packet += "," + d2;
         packet += "\n";
-
-        for (QTcpSocket *client : clients) {
-            if (client->state() == QAbstractSocket::ConnectedState) {
-                client->write(packet.toUtf8());
-                client->flush();
+        for (QTcpSocket *c : clients) {
+            if (c->state() == QAbstractSocket::ConnectedState) {
+                c->write(packet.toUtf8());
+                c->flush();
             }
         }
         qDebug().noquote() << "[TX]" << packet.trimmed();
@@ -110,8 +106,7 @@ private:
         QHBoxLayout *header = new QHBoxLayout();
         QLabel *title = new QLabel("VEDA SMART NVR");
         title->setObjectName("title");
-        statusDot = new QLabel();
-        statusDot->setFixedSize(12, 12);
+        statusDot = new QLabel(); statusDot->setFixedSize(12, 12);
         statusDot->setStyleSheet("background-color: #ff4d4d; border-radius: 6px;");
         statusText = new QLabel("OFFLINE");
         statusText->setStyleSheet("color: #ff4d4d; font-size: 10px; font-weight: bold;");
@@ -124,23 +119,17 @@ private:
         QVBoxLayout *sideBar = new QVBoxLayout();
         for(int i=1; i<=4; ++i) {
             QPushButton *chBtn = new QPushButton(QString("CH 0%1").arg(i));
-            chBtn->setObjectName("channelBtn");
-            chBtn->setCheckable(true);
-            chBtn->setFixedSize(125, 42); 
+            chBtn->setObjectName("channelBtn"); chBtn->setCheckable(true); chBtn->setFixedSize(125, 42); 
             connect(chBtn, &QPushButton::clicked, [this, i](){ changeChannel(i); });
-            sideBar->addWidget(chBtn);
-            channelButtons[i] = chBtn;
+            sideBar->addWidget(chBtn); channelButtons[i] = chBtn;
         }
 
         sideBar->addSpacing(5);
-        QPushButton *capBtn = new QPushButton("CAPTURE");
-        capBtn->setObjectName("mediaBtn");
-        QPushButton *recBtn = new QPushButton("RECORD");
-        recBtn->setObjectName("mediaBtn");
+        QPushButton *capBtn = new QPushButton("CAPTURE"); capBtn->setObjectName("mediaBtn");
+        QPushButton *recBtn = new QPushButton("RECORD"); recBtn->setObjectName("mediaBtn");
         sideBar->addWidget(capBtn); sideBar->addWidget(recBtn);
 
-        QPushButton *viewBtn = new QPushButton("VIEW SWITCH");
-        viewBtn->setObjectName("viewSwitchBtn");
+        QPushButton *viewBtn = new QPushButton("VIEW SWITCH"); viewBtn->setObjectName("viewSwitchBtn");
         viewBtn->setFixedSize(125, 52);
         connect(viewBtn, &QPushButton::clicked, this, &VmsController::toggleMainView);
         sideBar->addWidget(viewBtn); sideBar->addStretch();
@@ -159,8 +148,7 @@ private:
         mainArea->addWidget(contentStack, 1);
 
         dbSwitchBtn = new QPushButton("DB TAB: [ 주차 이력 ]");
-        dbSwitchBtn->setObjectName("dbBtn");
-        dbSwitchBtn->setFixedHeight(55);
+        dbSwitchBtn->setObjectName("dbBtn"); dbSwitchBtn->setFixedHeight(55);
         connect(dbSwitchBtn, &QPushButton::clicked, this, &VmsController::handleDbSwitch);
         mainArea->addWidget(dbSwitchBtn);
 
@@ -175,28 +163,90 @@ private:
         tcpServer = new QTcpServer(this);
         if (tcpServer->listen(QHostAddress::Any, 12345)) {
             connect(tcpServer, &QTcpServer::newConnection, [this]() {
-                QTcpSocket *client = tcpServer->nextPendingConnection();
-                clients.append(client);
+                QTcpSocket *c = tcpServer->nextPendingConnection();
+                clients.append(c);
                 statusDot->setStyleSheet("background-color: #00ff88; border-radius: 6px;");
-                statusText->setText("CONNECTED");
-                statusText->setStyleSheet("color: #00ff88; font-size: 10px; font-weight: bold;");
-                connect(client, &QTcpSocket::disconnected, [this, client]() {
-                    clients.removeAll(client); client->deleteLater();
+                statusText->setText("CONNECTED"); statusText->setStyleSheet("color: #00ff88; font-size: 10px; font-weight: bold;");
+                connect(c, &QTcpSocket::disconnected, [this, c]() {
+                    clients.removeAll(c); c->deleteLater();
                     if (clients.isEmpty()) {
                         statusDot->setStyleSheet("background-color: #ff4d4d; border-radius: 6px;");
-                        statusText->setText("OFFLINE");
-                        statusText->setStyleSheet("color: #ff4d4d; font-size: 10px; font-weight: bold;");
+                        statusText->setText("OFFLINE"); statusText->setStyleSheet("color: #ff4d4d; font-size: 10px; font-weight: bold;");
                     }
                 });
             });
         }
     }
 
+    // --- [핵심] libgpiod를 이용한 엔코더 설정 ---
+    void setupEncoder() {
+        // 1. GPIO 칩 열기 (RPi 4는 보통 /dev/gpiochip0 또는 /dev/gpiochip4)
+        // 터미널에서 'gpiodetect' 명령어로 확인 가능합니다. 보통 0번입니다.
+        chip = gpiod_chip_open("/dev/gpiochip0");
+        if (!chip) {
+            qDebug() << "GPIO Chip open failed! Try /dev/gpiochip4 if 0 fails.";
+            chip = gpiod_chip_open("/dev/gpiochip4");
+            if (!chip) return;
+        }
+
+        // 2. 라인 설정 (5, 6, 13번 핀)
+        unsigned int offsets[] = {5, 6, 26};
+        
+        struct gpiod_line_settings *settings = gpiod_line_settings_new();
+        gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT);
+        
+        struct gpiod_line_config *line_cfg = gpiod_line_config_new();
+        gpiod_line_config_add_line_settings(line_cfg, offsets, 3, settings);
+
+        // 3. 라인 요청 (Request)
+        struct gpiod_request_config *req_cfg = gpiod_request_config_new();
+        gpiod_request_config_set_consumer(req_cfg, "vms_encoder");
+
+        line_request = gpiod_chip_request_lines(chip, req_cfg, line_cfg);
+
+        // 메모리 해제 (요청 후 설정 객체들은 더 이상 필요 없음)
+        gpiod_line_settings_free(settings);
+        gpiod_line_config_free(line_cfg);
+        gpiod_request_config_free(req_cfg);
+
+        if (!line_request) {
+            qDebug() << "Line request failed!";
+            return;
+        }
+
+        QTimer *timer = new QTimer(this);
+        connect(timer, &QTimer::timeout, this, &VmsController::readEncoder);
+        timer->start(5);
+        qDebug() << "[SYSTEM] libgpiod v2.x Encoder initialized (Pins 5, 6, 26)";
+    }
+
+    void readEncoder() {
+        if (!line_request) return;
+
+        // v2.x 방식의 값 읽기 (0: Low, 1: High)
+        int c = gpiod_line_request_get_value(line_request, 5);
+        int d = gpiod_line_request_get_value(line_request, 6);
+        int s = gpiod_line_request_get_value(line_request, 26);
+
+        if (lastClkState != -1 && c != lastClkState) {
+            // 회전 방향 판별
+            sendPacket("ENC", (d != c) ? "1" : "-1");
+            qDebug() << "ENC Rotated:" << ((d != c) ? "CW" : "CCW");
+        }
+        lastClkState = c;
+
+        if (s == 0 && lastSwState == 1) {
+            sendPacket("ENC", "CLK");
+            qDebug() << "ENC SW Pressed";
+        }
+        lastSwState = s;
+    }
+
     void setupJoystick() {
         joyFd = open("/dev/input/event4", O_RDONLY | O_NONBLOCK);
         if (joyFd >= 0) {
-            QSocketNotifier *notifier = new QSocketNotifier(joyFd, QSocketNotifier::Read, this);
-            connect(notifier, &QSocketNotifier::activated, this, &VmsController::readJoystick);
+            QSocketNotifier *n = new QSocketNotifier(joyFd, QSocketNotifier::Read, this);
+            connect(n, &QSocketNotifier::activated, this, &VmsController::readJoystick);
         }
     }
 
@@ -207,73 +257,20 @@ private:
                 if (ev.code == ABS_X) {
                     if (ev.value > 200) { sendPacket("JOY", "R", "1"); lastXDir = "R"; }
                     else if (ev.value < 50) { sendPacket("JOY", "L", "1"); lastXDir = "L"; }
-                    else if (ev.value >= 120 && ev.value <= 135 && !lastXDir.isEmpty()) {
-                        sendPacket("JOY", lastXDir, "0"); lastXDir = ""; 
-                    }
+                    else if (ev.value >= 120 && ev.value <= 135 && !lastXDir.isEmpty()) { sendPacket("JOY", lastXDir, "0"); lastXDir = ""; }
                 }
                 else if (ev.code == ABS_Y) {
                     if (ev.value > 200) { sendPacket("JOY", "D", "1"); lastYDir = "D"; }
                     else if (ev.value < 50) { sendPacket("JOY", "U", "1"); lastYDir = "U"; }
-                    else if (ev.value >= 120 && ev.value <= 135 && !lastYDir.isEmpty()) {
-                        sendPacket("JOY", lastYDir, "0"); lastYDir = "";
-                    }
+                    else if (ev.value >= 120 && ev.value <= 135 && !lastYDir.isEmpty()) { sendPacket("JOY", lastYDir, "0"); lastYDir = ""; }
                 }
             }
-            else if (ev.type == EV_KEY && ev.value == 1) {
-                sendPacket("BTN", QString::number(ev.code));
-            }
-        }
-    }
-
-    // --- [수정] 엔코더 핀 변경 및 스위치(GPIO 25) 추가 ---
-    void setupEncoder() {
-        auto exportGpio = [](int pin) {
-            if (!QDir(QString("/sys/class/gpio/gpio%1").arg(pin)).exists()) {
-                QFile f("/sys/class/gpio/export");
-                if (f.open(QIODevice::WriteOnly)) { f.write(QByteArray::number(pin)); f.close(); usleep(100000); }
-            }
-            QFile dir(QString("/sys/class/gpio/gpio%1/direction").arg(pin));
-            if (dir.open(QIODevice::WriteOnly)) { dir.write("in"); dir.close(); }
-        };
-
-        exportGpio(5); // CLK
-        exportGpio(6); // DT
-        exportGpio(13); // SW (스위치)
-
-        QTimer *timer = new QTimer(this);
-        connect(timer, &QTimer::timeout, this, &VmsController::readEncoder);
-        timer->start(5);
-    }
-
-    void readEncoder() {
-        QFile fClk("/sys/class/gpio/gpio5/value");
-        QFile fDt("/sys/class/gpio/gpio6/value");
-        QFile fSw("/sys/class/gpio/gpio13/value");
-
-        if (fClk.open(QIODevice::ReadOnly) && fDt.open(QIODevice::ReadOnly)) {
-            int c = fClk.readAll().trimmed().toInt();
-            int d = fDt.readAll().trimmed().toInt();
-            if (lastClkState != -1 && c != lastClkState) {
-                // 회전 패킷 전송
-                sendPacket("ENC", (d != c) ? "1" : "-1");
-            }
-            lastClkState = c;
-        }
-
-        if (fSw.open(QIODevice::ReadOnly)) {
-            int s = fSw.readAll().trimmed().toInt();
-            // Low(0)일 때 눌린 것으로 판단 (풀업 저항 기준)
-            if (s == 0 && lastSwState == 1) {
-                sendPacket("ENC", "CLK"); // 리셋 패킷 전송
-                qDebug() << "[ENCODER] Switch Pressed - Reset sent";
-            }
-            lastSwState = s;
+            else if (ev.type == EV_KEY && ev.value == 1) sendPacket("BTN", QString::number(ev.code));
         }
     }
 
     void changeChannel(int ch) {
-        currentCh = ch;
-        for(int i=1; i<=4; ++i) channelButtons[i]->setChecked(i == ch);
+        currentCh = ch; for(int i=1; i<=4; ++i) channelButtons[i]->setChecked(i == ch);
         player->stop();
         QUrl url(QString("rtsp://%1:554/profile7/media.smp").arg(cams[ch].ip));
         url.setUserName(cams[ch].user); url.setPassword(cams[ch].pass);
