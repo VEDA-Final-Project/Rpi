@@ -1,0 +1,1 @@
+savedcmd_/home/karas/qt_vms/driver/vms_encoder.ko := aarch64-linux-gnu-ld -r -EL  -maarch64elf -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T arch/arm64/module.lds -o /home/karas/qt_vms/driver/vms_encoder.ko /home/karas/qt_vms/driver/vms_encoder.o /home/karas/qt_vms/driver/vms_encoder.mod.o /home/karas/qt_vms/driver/.module-common.o
