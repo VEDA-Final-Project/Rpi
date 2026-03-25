@@ -1066,6 +1066,49 @@ deps_/home/karas/qt_vms/driver/vms_encoder.o := \
   arch/arm64/include/generated/uapi/asm/poll.h \
   /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/uapi/asm-generic/poll.h \
   /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/uapi/linux/eventpoll.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/device.h \
+    $(wildcard include/config/GENERIC_MSI_IRQ) \
+    $(wildcard include/config/ENERGY_MODEL) \
+    $(wildcard include/config/PINCTRL) \
+    $(wildcard include/config/ARCH_HAS_DMA_OPS) \
+    $(wildcard include/config/DMA_DECLARE_COHERENT) \
+    $(wildcard include/config/DMA_CMA) \
+    $(wildcard include/config/SWIOTLB) \
+    $(wildcard include/config/SWIOTLB_DYNAMIC) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_DEVICE) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU_ALL) \
+    $(wildcard include/config/DMA_OPS_BYPASS) \
+    $(wildcard include/config/DMA_NEED_SYNC) \
+    $(wildcard include/config/IOMMU_DMA) \
+    $(wildcard include/config/PM) \
+    $(wildcard include/config/OF) \
+    $(wildcard include/config/DEVTMPFS) \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/dev_printk.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/energy_model.h \
+    $(wildcard include/config/SCHED_DEBUG) \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/sched/cpufreq.h \
+    $(wildcard include/config/CPU_FREQ) \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/sched/topology.h \
+    $(wildcard include/config/SCHED_CLUSTER) \
+    $(wildcard include/config/SCHED_MC) \
+    $(wildcard include/config/CPU_FREQ_GOV_SCHEDUTIL) \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/sched/idle.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/sched/sd_flags.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/ioport.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/klist.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/pm.h \
+    $(wildcard include/config/VT_CONSOLE_SLEEP) \
+    $(wildcard include/config/CXL_SUSPEND) \
+    $(wildcard include/config/PM_CLK) \
+    $(wildcard include/config/PM_GENERIC_DOMAINS) \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/device/bus.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/device/class.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/device/devres.h \
+    $(wildcard include/config/HAS_IOMEM) \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/device/driver.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/arch/arm64/include/asm/device.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/pm_wakeup.h \
 
 /home/karas/qt_vms/driver/vms_encoder.o: $(deps_/home/karas/qt_vms/driver/vms_encoder.o)
 

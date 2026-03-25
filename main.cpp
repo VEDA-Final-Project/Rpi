@@ -148,7 +148,7 @@ private:
     void setupEncoder() {
         encFd = open("/dev/vms_encoder", O_RDONLY | O_NONBLOCK);
         if (encFd >= 0) {
-            qDebug() << "✅ Kernel Driver (/dev/vms_encoder) Connected!";
+            qDebug() << "Kernel Driver (/dev/vms_encoder) Connected!";
             encNotifier = new QSocketNotifier(encFd, QSocketNotifier::Read, this);
             connect(encNotifier, &QSocketNotifier::activated, [this](){
                 int val = 0;
@@ -162,11 +162,11 @@ private:
                 }
             });
         } else {
-            qDebug() << "❌ Failed to open Kernel Driver!";
+            qDebug() << "Failed to open Kernel Driver!";
         }
     }
 
-    // --- [설정] 조이스틱 연동 ---
+    // ---조이스틱 연동 ---
     void setupJoystick() {
         joyFd = open("/dev/input/event4", O_RDONLY | O_NONBLOCK);
         if (joyFd >= 0) {
@@ -283,7 +283,7 @@ private:
         mainStack->setCurrentIndex(0);
         dbSwitchBtn->setText("데이터베이스(DB) 보기");
         dbSwitchBtn->setStyleSheet("background-color: #00ff88; color: #0f1115;");
-        sendPacket("BTN", "287"); 
+        sendPacket("BTN", "288"); 
     }
 
     void handleDbControl() {
