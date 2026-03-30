@@ -119,7 +119,7 @@ private:
             connect(tcpServer, &QTcpServer::newConnection, [this]() {
                 QTcpSocket *c = tcpServer->nextPendingConnection();
                 clients.append(c);
-                statusDot->setStyleSheet("background-color: #00ff88; border-radius: 6px;");
+                statusDot->setStyleSheet("min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; border-radius: 7px; background-color: #00ff88; border: 1px solid #00ff88; margin-top: 1px;");
                 statusText->setText("CONNECTED");
 
                 connect(c, &QTcpSocket::readyRead, [this, c](){
@@ -136,8 +136,8 @@ private:
                     clients.removeAll(c);
                     c->deleteLater();
                     if(clients.isEmpty()) {
-                        statusDot->setStyleSheet("background-color: #ff4d4d; border-radius: 6px;");
-                        statusText->setText("OFFLINE");
+                    statusDot->setStyleSheet("min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; border-radius: 7px; background-color: #ff4d4d; border: 1px solid #ff4d4d; margin-top: 1px;");
+                    statusText->setText("OFFLINE");
                     }
                 });
             });
@@ -200,59 +200,132 @@ private:
     void setupDesign() {
         this->setFixedSize(800, 480);
         int fontId = QFontDatabase::addApplicationFont("/home/karas/.local/share/fonts/Pretendard-Regular.otf");
-        if (fontId != -1) QApplication::setFont(QFont(QFontDatabase::applicationFontFamilies(fontId).at(0)));
-        this->setStyleSheet(
-            "QWidget { background-color: #0f1115; color: #e1e1e1; font-family: 'Pretendard'; }"
-            "QPushButton#channelBtn { background-color: #1c1f26; border: 1px solid #2d323e; border-radius: 6px; padding: 10px; font-weight: 600; }"
-            "QPushButton#channelBtn:checked { border: 1px solid #00ff88; color: #00ff88; }"
-            "QPushButton#mediaBtn { background-color: #2980b9; border-radius: 6px; color: white; font-weight: bold; min-height: 40px; }"
-            "QPushButton#liveBtn { background-color: #2ecc71; border-radius: 6px; color: white; font-weight: bold; min-height: 45px; }"
-            "QPushButton#dbBtn { background-color: #00ff88; color: #0f1115; border-radius: 6px; font-size: 16px; font-weight: 800; }"
-            "QLabel#title { color: #00ff88; font-size: 24px; font-weight: 900; }"
-            "QTableWidget { background-color: #16191d; gridline-color: #2d323e; border: none; font-size: 10px; color: #e1e1e1; }"
-            "QHeaderView::section { background-color: #2d323e; color: #00ff88; font-weight: bold; font-size: 10px; border: 1px solid #16191d; }"
-        );
+        QString fontFamily = fontId != -1 ? QFontDatabase::applicationFontFamilies(fontId).at(0) : "sans-serif";
+        QApplication::setFont(QFont(fontFamily));
+
+        // 최신 트렌드의 Dark Theme + RoadSide 포인트 컬러(#00d188) 적용
+        this->setStyleSheet(QString(
+            "QWidget { background-color: #14171c; color: #ffffff; font-family: '%1'; }" // 전체 배경
+            
+            // 타이틀 (RoadSide)
+            "QLabel#title { color: #ffffff; font-size: 26px; font-weight: 900; letter-spacing: 1px; }"
+            "QLabel#logoIcon { background: transparent; }"
+            "QLabel#statusText { font-size: 13px; font-weight: 800; color: #a0a5b1; }"
+            
+            // 사이드바 컨테이너
+            "QWidget#sidebar { background-color: #1e222a; border-radius: 12px; }"
+            
+            // 채널 버튼
+            "QPushButton#channelBtn { background-color: #272c36; color: #a0a5b1; border: 2px solid transparent; border-radius: 8px; padding: 10px; font-size: 14px; font-weight: 800; text-align: left; padding-left: 15px; }"
+            "QPushButton#channelBtn:checked { background-color: #1a2f28; border: 2px solid #00d188; color: #00d188; }"
+            "QPushButton#channelBtn:pressed { background-color: #1f242c; }"
+            
+            // 캡처/녹화 버튼
+            "QPushButton#mediaBtn { background-color: #3b4252; color: #d8dee9; border-radius: 8px; font-weight: 800; font-size: 13px; min-height: 40px; text-align: left; padding-left: 15px; }"
+            "QPushButton#mediaBtn:pressed { background-color: #2e3440; }"
+            
+            // 라이브 뷰 버튼
+            "QPushButton#liveBtn { background-color: #00d188; color: #14171c; border-radius: 8px; font-weight: 900; font-size: 14px; min-height: 45px; }"
+            "QPushButton#liveBtn:pressed { background-color: #00b374; }"
+            
+            // DB 버튼
+"QPushButton#dbBtn { background-color: #2d3442; color: #00d188; border: 2px solid #00d188; border-radius: 10px; font-size: 16px; font-weight: 900; text-align: center; }"            "QPushButton#dbBtn:pressed { background-color: #1a2f28; }"
+            
+            // DB 테이블 
+            "QTableWidget { background-color: #1e222a; gridline-color: #2d3442; border: 1px solid #2d3442; border-radius: 8px; font-size: 12px; color: #e1e1e1; outline: none; }"
+            "QHeaderView::section { background-color: #272c36; color: #00d188; font-weight: 800; font-size: 12px; border: none; border-right: 1px solid #2d3442; border-bottom: 1px solid #2d3442; padding: 6px; }"
+            "QTableWidget::item:selected { background-color: #00d188; color: #14171c; }"
+        ).arg(fontFamily));
     }
 
     void setupUI() {
         QVBoxLayout *root = new QVBoxLayout(this);
-        root->setContentsMargins(10, 5, 10, 10);
+        root->setContentsMargins(15, 15, 15, 15);
+        root->setSpacing(15);
         
+        // --- [헤더 영역] ---
         QHBoxLayout *header = new QHBoxLayout();
-        QLabel *title = new QLabel("VEDA SMART NVR");
-        title->setObjectName("title");
-        statusDot = new QLabel(); statusDot->setFixedSize(12, 12);
-        statusDot->setStyleSheet("background-color: #ff4d4d; border-radius: 6px;");
-        statusText = new QLabel("OFFLINE");
-        header->addWidget(title); header->addStretch(); header->addWidget(statusText); header->addWidget(statusDot);
+        header->setContentsMargins(5, 0, 5, 0);
+        
+        QHBoxLayout *titleLayout = new QHBoxLayout();
+        QLabel *logoIcon = new QLabel(); logoIcon->setObjectName("logoIcon");
+        QPixmap logoPixmap("/home/karas/qt_vms/icons/roadside_mark.png");
+        if (!logoPixmap.isNull()) {
+            logoIcon->setPixmap(logoPixmap.scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        } else {
+            logoIcon->setText("X"); logoIcon->setStyleSheet("font-size: 24px; background: transparent;"); // 이미지 로드 실패 시 이모지 대체
+        }
+        QLabel *title = new QLabel("RoadSide"); title->setObjectName("title"); // ★ 타이틀 텍스트 "RoadSide"로 설정
+        titleLayout->addWidget(logoIcon);
+        titleLayout->addWidget(title);
+        titleLayout->setSpacing(10);
+        
+        statusDot = new QLabel(); statusDot->setFixedSize(14, 14);
+        statusDot->setStyleSheet("min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; border-radius: 7px; background-color: #ff4d4d; border: 1px solid #ff4d4d; margin-top: 1px;");
+        statusText = new QLabel("OFFLINE"); statusText->setObjectName("statusText");
+        
+        header->addLayout(titleLayout);
+        header->addStretch();
+        header->addWidget(statusText);
+        header->addSpacing(5);
+        header->addWidget(statusDot);
         root->addLayout(header);
 
+        // --- [중앙 영역] ---
         QHBoxLayout *mid = new QHBoxLayout();
-        QVBoxLayout *side = new QVBoxLayout();
+        mid->setSpacing(15);
         
+        // 사이드바 (독립된 패널 디자인 적용)
+        QWidget *sidebarWidget = new QWidget();
+        sidebarWidget->setObjectName("sidebar");
+        sidebarWidget->setFixedWidth(150);
+        QVBoxLayout *side = new QVBoxLayout(sidebarWidget);
+        side->setContentsMargins(12, 15, 12, 15);
+        side->setSpacing(10);
+        
+        QLabel *chLabel = new QLabel("CHANNELS");
+        chLabel->setStyleSheet("color: #6a7181; font-size: 11px; font-weight: bold; background: transparent;");
+        side->addWidget(chLabel);
+
+        QIcon channelIcon("/home/karas/qt_vms/icons/icon_channel.png"); // ★ 채널 버튼 PNG 아이콘 이미지 사용 (가상 경로)
         for(int i=1; i<=4; ++i) {
             QPushButton *btn = new QPushButton(QString("CH 0%1").arg(i));
-            btn->setObjectName("channelBtn"); btn->setCheckable(true); btn->setFixedSize(125, 42);
+            btn->setObjectName("channelBtn"); btn->setCheckable(true); btn->setFixedHeight(45);
+            if (!channelIcon.isNull()) btn->setIcon(channelIcon); // 이미지 로드 성공 시 아이콘 설정
             connect(btn, &QPushButton::clicked, [this, i](){ switchToLiveView(); changeChannel(i); });
             side->addWidget(btn); channelButtons[i] = btn;
         }
-        side->addSpacing(10);
         
+        side->addSpacing(10);
+        QLabel *ctrlLabel = new QLabel("CONTROLS");
+        ctrlLabel->setStyleSheet("color: #6a7181; font-size: 11px; font-weight: bold; background: transparent;");
+        side->addWidget(ctrlLabel);
+
+        QIcon captureIcon("/home/karas/qt_vms/icons/icon_capture.png"); // ★ 캡처 버튼 PNG 아이콘 이미지 사용 (가상 경로)
+        QIcon recordIcon("/home/karas/qt_vms/icons/icon_record.png"); // ★ 녹화 버튼 PNG 아이콘 이미지 사용 (가상 경로)
         QPushButton *capBtn = new QPushButton("CAPTURE"); capBtn->setObjectName("mediaBtn");
         QPushButton *recBtn = new QPushButton("RECORD"); recBtn->setObjectName("mediaBtn");
+        if (!captureIcon.isNull()) capBtn->setIcon(captureIcon); // 이미지 로드 성공 시 아이콘 설정
+        if (!recordIcon.isNull()) recBtn->setIcon(recordIcon); // 이미지 로드 성공 시 아이콘 설정
         connect(capBtn, &QPushButton::clicked, [this](){ sendPacket("BTN", "294"); });
         connect(recBtn, &QPushButton::clicked, [this](){ sendPacket("BTN", "295"); });
         side->addWidget(capBtn); side->addWidget(recBtn);
         
-        QPushButton *liveBtn = new QPushButton("LIVE VIEW");
+        side->addStretch();
+        
+        QPushButton *liveBtn = new QPushButton("▶ LIVE VIEW"); // ★ "▶" 이모지 아이콘은 깨지지 않으므로 유지
         liveBtn->setObjectName("liveBtn");
         connect(liveBtn, &QPushButton::clicked, this, &VmsController::switchToLiveView);
         side->addWidget(liveBtn);
-        side->addStretch();
-        mid->addLayout(side);
+        
+        mid->addWidget(sidebarWidget);
 
+        // 메인 영상 및 DB 영역
         QVBoxLayout *mainArea = new QVBoxLayout();
+        mainArea->setSpacing(15);
+        
         mainStack = new QStackedWidget();
+        mainStack->setStyleSheet("background-color: #000000; border-radius: 12px;"); // 영상 뷰어는 리얼 블랙
         videoWidget = new QVideoWidget();
         mainStack->addWidget(videoWidget);
 
@@ -265,13 +338,18 @@ private:
         for(int i=0; i<4; ++i) {
             tables[i]->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
             tables[i]->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            tables[i]->setSelectionBehavior(QAbstractItemView::SelectRows);
+            tables[i]->verticalHeader()->setVisible(false); // ★ 엑셀 같은 행 번호 숨김 (깔끔한 대시보드 느낌)
+            tables[i]->setShowGrid(false); // 내부 선 제거
             dbTabStack->addWidget(tables[i]);
         }
         mainStack->addWidget(dbTabStack);
         mainArea->addWidget(mainStack, 1);
 
+        QIcon dbIcon("/home/karas/qt_vms/icons/icon_db.png"); //DB 버튼 PNG 아이콘 이미지 사용 (가상 경로)
         dbSwitchBtn = new QPushButton("데이터베이스(DB) 보기");
-        dbSwitchBtn->setObjectName("dbBtn"); dbSwitchBtn->setFixedHeight(60);
+        dbSwitchBtn->setObjectName("dbBtn"); dbSwitchBtn->setFixedHeight(55);
+        if (!dbIcon.isNull()) dbSwitchBtn->setIcon(dbIcon); // 이미지 로드 성공 시 아이콘 설정
         connect(dbSwitchBtn, &QPushButton::clicked, this, &VmsController::handleDbControl);
         mainArea->addWidget(dbSwitchBtn);
 
@@ -282,7 +360,7 @@ private:
     void switchToLiveView() {
         mainStack->setCurrentIndex(0);
         dbSwitchBtn->setText("데이터베이스(DB) 보기");
-        dbSwitchBtn->setStyleSheet("background-color: #00ff88; color: #0f1115;");
+        dbSwitchBtn->setStyleSheet(""); // QSS 기본 스타일로 복구
         sendPacket("BTN", "288"); 
     }
 
@@ -306,7 +384,8 @@ private:
 
     void updateDbButtonText() {
         dbSwitchBtn->setText(QString("[%1] 탭 (다음 탭 클릭)").arg(dbTabNames[currentDbIdx]));
-        dbSwitchBtn->setStyleSheet("background-color: #e67e22; color: white;"); 
+        // DB 보기 활성화 시 버튼 디자인 변경
+        dbSwitchBtn->setStyleSheet("background-color: #1a2f28; color: #00d188; border: 2px solid #00d188;"); 
     }
 
     void setupPlayer() { player = new QMediaPlayer(this, QMediaPlayer::LowLatency); player->setVideoOutput(videoWidget); }
