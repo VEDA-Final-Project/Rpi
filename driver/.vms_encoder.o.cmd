@@ -1109,6 +1109,7 @@ deps_/home/karas/qt_vms/driver/vms_encoder.o := \
   /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/device/driver.h \
   /usr/src/linux-headers-6.12.62+rpt-common-rpi/arch/arm64/include/asm/device.h \
   /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/pm_wakeup.h \
+  /usr/src/linux-headers-6.12.62+rpt-common-rpi/include/linux/kfifo.h \
 
 /home/karas/qt_vms/driver/vms_encoder.o: $(deps_/home/karas/qt_vms/driver/vms_encoder.o)
 

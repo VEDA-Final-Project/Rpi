@@ -23,6 +23,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <QScrollArea>
+#include <QScrollBar>
 
 struct CameraInfo { QString ip, user, pass; };
 
@@ -54,6 +56,9 @@ private:
     int joyFd = -1;
     QSocketNotifier *encNotifier = nullptr;
     QSocketNotifier *joyNotifier = nullptr;
+
+    QScrollArea *videoScrollArea;
+    double currentZoom = 1.0;   //PTZ 변수
     
     QTcpServer *tcpServer;
     QList<QTcpSocket*> clients;
@@ -153,11 +158,18 @@ private:
             connect(encNotifier, &QSocketNotifier::activated, [this](){
                 int val = 0;
                 if (read(encFd, &val, sizeof(int)) > 0) {
-                    if (val == 1) sendPacket("ENC", "1");
-                    else if (val == -1) sendPacket("ENC", "-1");
+                    if (val == 1) {
+                        sendPacket("ENC", "1");
+                        //handleZoom(0.2); //줌 인 (20%씩 확대) 
+                    }
+                    else if (val == -1) {
+                        sendPacket("ENC", "-1");
+                        //handleZoom(-0.2); //줌 아웃 (20%씩 축소)
+                    }
                     else if (val == 100) {
                         sendPacket("ENC", "CLK");
                         if (mainStack->currentIndex() == 1) switchToLiveView();
+                        else resetPTZ();
                     }
                 }
             });
@@ -166,9 +178,9 @@ private:
         }
     }
 
-    // ---조이스틱 연동 ---
+    // --- 조이스틱 연동 (플러딩 완벽 방어형 상태 머신 적용) ---
     void setupJoystick() {
-        joyFd = open("/dev/input/event4", O_RDONLY | O_NONBLOCK);
+        joyFd = open("/dev/vms_joystick", O_RDONLY | O_NONBLOCK);
         if (joyFd >= 0) {
             joyNotifier = new QSocketNotifier(joyFd, QSocketNotifier::Read, this);
             connect(joyNotifier, &QSocketNotifier::activated, [this](){
@@ -176,20 +188,36 @@ private:
                 while (read(this->joyFd, &ev, sizeof(ev)) > 0) {
                     if (ev.type == EV_ABS) {
                         if (ev.code == ABS_X) {
-                            if (ev.value > 200) { sendPacket("JOY", "R", "1"); lastXDir = "R"; }
-                            else if (ev.value < 50) { sendPacket("JOY", "L", "1"); lastXDir = "L"; }
-                            else if (ev.value >= 120 && ev.value <= 135 && !lastXDir.isEmpty()) { 
-                                sendPacket("JOY", lastXDir, "0"); lastXDir = ""; 
+                            QString newXDir = "";
+                            if (ev.value > 200) { newXDir = "R"; handlePan(30, 0); } // 오른쪽 이동
+                            else if (ev.value < 50) { newXDir = "L"; handlePan(-30, 0); }
+
+                            // 상태가 변했을 때만 패킷 전송 (플러딩 방지)
+                            if (newXDir != lastXDir) {
+                                if (!lastXDir.isEmpty()) sendPacket("JOY", lastXDir, "0"); // 이전 방향 Release
+                                if (!newXDir.isEmpty()) sendPacket("JOY", newXDir, "1");   // 새 방향 Press
+                                lastXDir = newXDir;
                             }
                         } else if (ev.code == ABS_Y) {
-                            if (ev.value > 200) { sendPacket("JOY", "D", "1"); lastYDir = "D"; }
-                            else if (ev.value < 50) { sendPacket("JOY", "U", "1"); lastYDir = "U"; }
-                            else if (ev.value >= 120 && ev.value <= 135 && !lastYDir.isEmpty()) { 
-                                sendPacket("JOY", lastYDir, "0"); lastYDir = ""; 
+                            QString newYDir = "";
+                            if (ev.value > 200) { newYDir = "D"; handlePan(0, 30); }
+                            else if (ev.value < 50) { newYDir = "U"; handlePan(0, -30); }
+
+                            if (newYDir != lastYDir) {
+                                if (!lastYDir.isEmpty()) sendPacket("JOY", lastYDir, "0"); // 이전 방향 Release
+                                if (!newYDir.isEmpty()) sendPacket("JOY", newYDir, "1");   // 새 방향 Press
+                                lastYDir = newYDir;
                             }
                         }
                     } else if (ev.type == EV_KEY && ev.value == 1) {
                         sendPacket("BTN", QString::number(ev.code));
+
+                        // 하드웨어 버튼으로 채널 전환하는 부분 (288~291)
+                        if (ev.code >= 288 && ev.code <= 291) {
+                            int targetCh = ev.code - 287; // 288->1, 289->2...
+                            switchToLiveView();
+                            changeChannel(targetCh);
+                        }
                     }
                 }
             });
@@ -229,7 +257,7 @@ private:
             "QPushButton#liveBtn:pressed { background-color: #00b374; }"
             
             // DB 버튼
-"QPushButton#dbBtn { background-color: #2d3442; color: #00d188; border: 2px solid #00d188; border-radius: 10px; font-size: 16px; font-weight: 900; text-align: center; }"            "QPushButton#dbBtn:pressed { background-color: #1a2f28; }"
+            "QPushButton#dbBtn { background-color: #2d3442; color: #00d188; border: 2px solid #00d188; border-radius: 10px; font-size: 16px; font-weight: 900; text-align: center; }"            "QPushButton#dbBtn:pressed { background-color: #1a2f28; }"
             
             // DB 테이블 
             "QTableWidget { background-color: #1e222a; gridline-color: #2d3442; border: 1px solid #2d3442; border-radius: 8px; font-size: 12px; color: #e1e1e1; outline: none; }"
@@ -325,9 +353,19 @@ private:
         mainArea->setSpacing(15);
         
         mainStack = new QStackedWidget();
-        mainStack->setStyleSheet("background-color: #000000; border-radius: 12px;"); // 영상 뷰어는 리얼 블랙
+        mainStack->setStyleSheet("background-color: #000000; border-radius: 12px;");
         videoWidget = new QVideoWidget();
-        mainStack->addWidget(videoWidget);
+        
+        //비디오 위젯을 스크롤 에어리어로 감싸기 (소프트웨어 PTZ 용도)
+        videoScrollArea = new QScrollArea();
+        videoScrollArea->setWidget(videoWidget);
+        videoScrollArea->setWidgetResizable(true); // 기본은 화면에 꽉 차게
+        videoScrollArea->setAlignment(Qt::AlignCenter);
+        videoScrollArea->setStyleSheet("border: none; background-color: transparent;");
+        videoScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // 스크롤바 숨김
+        videoScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        
+        mainStack->addWidget(videoScrollArea);
 
         dbTabStack = new QStackedWidget();
         tables[0] = new QTableWidget(0, 6); tables[0]->setHorizontalHeaderLabels({"번호판", "구역명", "입차시간", "출차시간", "지불 여부", "총 금액"});
@@ -386,6 +424,36 @@ private:
         dbSwitchBtn->setText(QString("[%1] 탭 (다음 탭 클릭)").arg(dbTabNames[currentDbIdx]));
         // DB 보기 활성화 시 버튼 디자인 변경
         dbSwitchBtn->setStyleSheet("background-color: #1a2f28; color: #00d188; border: 2px solid #00d188;"); 
+    }
+
+    // --- 소프트웨어 PTZ 제어 ---
+    void handleZoom(double delta) {
+        if (mainStack->currentIndex() != 0) return; // 라이브 뷰 화면일 때만 작동
+        
+        currentZoom += delta;
+        if (currentZoom < 1.0) currentZoom = 1.0;
+        if (currentZoom > 5.0) currentZoom = 5.0; // 최대 5배 줌 제한
+
+        if (currentZoom == 1.0) {
+            videoScrollArea->setWidgetResizable(true); // 1배율이면 원래 화면 꽉 차게 복귀
+        } else {
+            videoScrollArea->setWidgetResizable(false);
+            QSize baseSize = videoScrollArea->viewport()->size();
+            videoWidget->setFixedSize(baseSize * currentZoom); // 배율만큼 크기 강제 확장
+        }
+    }
+
+    void resetPTZ() {
+        currentZoom = 1.0;
+        videoScrollArea->setWidgetResizable(true);
+    }
+
+    void handlePan(int dx, int dy) {
+        if (currentZoom <= 1.0 || mainStack->currentIndex() != 0) return; // 확대 안 되어있으면 이동 안 함
+        QScrollBar *hBar = videoScrollArea->horizontalScrollBar();
+        QScrollBar *vBar = videoScrollArea->verticalScrollBar();
+        hBar->setValue(hBar->value() + dx);
+        vBar->setValue(vBar->value() + dy);
     }
 
     void setupPlayer() { player = new QMediaPlayer(this, QMediaPlayer::LowLatency); player->setVideoOutput(videoWidget); }

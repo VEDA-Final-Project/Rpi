@@ -18,13 +18,15 @@ __section(".gnu.linkonce.this_module") = {
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
-	{ 0xdf484963, "device_destroy" },
-	{ 0x6775d5d3, "class_destroy" },
 	{ 0xc1514a3b, "free_irq" },
 	{ 0xfe990052, "gpio_free" },
+	{ 0xdf484963, "device_destroy" },
+	{ 0x6775d5d3, "class_destroy" },
 	{ 0x6bc3fbc0, "__unregister_chrdev" },
 	{ 0x92997ed8, "_printk" },
 	{ 0x15ba50a6, "jiffies" },
+	{ 0x34db050b, "_raw_spin_lock_irqsave" },
+	{ 0xd35cce70, "_raw_spin_unlock_irqrestore" },
 	{ 0xe2964344, "__wake_up" },
 	{ 0xfe487975, "init_wait_entry" },
 	{ 0x1000e51, "schedule" },
@@ -47,4 +49,4 @@ __used __section("__versions") = {
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "6AC9F22DE7C97C25D89AC0F");
+MODULE_INFO(srcversion, "6340A7D460F0604576BB7C8");
